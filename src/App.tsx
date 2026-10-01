@@ -101,10 +101,36 @@ export default function App() {
   const [simulating, setSimulating] = useState<boolean>(false);
   const [simulationMessage, setSimulationMessage] = useState<string>('');
 
-  const fetchData = async () => {
+  const fetchData = async (retries = 15, delay = 1500) => {
     try {
       const res = await fetch('/api/data');
-      const data = await res.json();
+      const text = await res.text();
+      
+      // Handle server warmup HTML response ("Starting Server...")
+      if (text.trim().startsWith('<!doctype') || text.includes('Starting Server')) {
+        if (retries > 0) {
+          setTimeout(() => fetchData(retries - 1, delay), delay);
+          return;
+        } else {
+          console.error('Server warmup timed out.');
+          setLoading(false);
+          return;
+        }
+      }
+
+      let data;
+      try {
+        data = JSON.parse(text);
+      } catch (e) {
+        if (retries > 0) {
+          setTimeout(() => fetchData(retries - 1, delay), delay);
+          return;
+        }
+        console.error('Non-JSON response from /api/data:', text);
+        setLoading(false);
+        return;
+      }
+
       setAlerts(data.alerts || []);
       setIncidents(data.incidents || []);
       setEndpoints(data.endpoints || []);
@@ -114,6 +140,10 @@ export default function App() {
       }
       setLoading(false);
     } catch (err) {
+      if (retries > 0) {
+        setTimeout(() => fetchData(retries - 1, delay), delay);
+        return;
+      }
       console.error('Failed to fetch SOC data:', err);
       setLoading(false);
     }
@@ -121,7 +151,7 @@ export default function App() {
 
   useEffect(() => {
     fetchData();
-    const interval = setInterval(fetchData, 10000);
+    const interval = setInterval(() => fetchData(3, 2000), 15000);
     return () => clearInterval(interval);
   }, []);
 
@@ -134,15 +164,26 @@ export default function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ scenario })
       });
-      const data = await res.json();
+      const text = await res.text();
+      if (text.trim().startsWith('<!doctype') || text.includes('Starting Server')) {
+        throw new Error('Server is still warming up. Please try again.');
+      }
+      let data;
+      try {
+        data = JSON.parse(text);
+      } catch (e) {
+        throw new Error(`Server returned non-JSON response (${res.status}): ${text.slice(0, 80)}`);
+      }
       if (data.success) {
         setSimulationMessage(`Simulation successful. Telemetry ingested & correlated.`);
-        await fetchData();
+        await fetchData(3, 1000);
+      } else {
+        setSimulationMessage(`Simulation failed: ${data.error || 'Unknown error'}`);
       }
-    } catch (err) {
-      setSimulationMessage(`Simulation error: ${err}`);
+    } catch (err: any) {
+      setSimulationMessage(`Simulation error: ${err.message || err}`);
     } finally {
-      setTimeout(() => setSimulating(false), 2000);
+      setTimeout(() => setSimulating(false), 3000);
     }
   };
 
@@ -153,13 +194,22 @@ export default function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ host_id: hostId, analyst_id: 'Analyst_1' })
       });
-      const data = await res.json();
+      const text = await res.text();
+      if (text.trim().startsWith('<!doctype') || text.includes('Starting Server')) {
+        throw new Error('Server is still warming up.');
+      }
+      let data;
+      try {
+        data = JSON.parse(text);
+      } catch (e) {
+        throw new Error(`Server returned non-JSON response (${res.status})`);
+      }
       if (data.success) {
-        await fetchData();
+        await fetchData(3, 1000);
         alert(data.message);
       }
-    } catch (err) {
-      alert(`Error isolating endpoint: ${err}`);
+    } catch (err: any) {
+      alert(`Error isolating endpoint: ${err.message || err}`);
     }
   };
 
@@ -170,13 +220,22 @@ export default function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username, analyst_id: 'Analyst_1' })
       });
-      const data = await res.json();
+      const text = await res.text();
+      if (text.trim().startsWith('<!doctype') || text.includes('Starting Server')) {
+        throw new Error('Server is still warming up.');
+      }
+      let data;
+      try {
+        data = JSON.parse(text);
+      } catch (e) {
+        throw new Error(`Server returned non-JSON response (${res.status})`);
+      }
       if (data.success) {
-        await fetchData();
+        await fetchData(3, 1000);
         alert(data.message);
       }
-    } catch (err) {
-      alert(`Error disabling account: ${err}`);
+    } catch (err: any) {
+      alert(`Error disabling account: ${err.message || err}`);
     }
   };
 
@@ -196,9 +255,9 @@ export default function App() {
   if (loading) {
     return (
       <div className="min-h-screen bg-[#090D16] text-slate-200 flex items-center justify-center font-mono text-xs tracking-wider">
-        <div className="flex items-center gap-3">
-          <RefreshCw className="w-4 h-4 text-cyan-400 animate-spin" />
-          <span>CONNECTING TO SOC-X SIEM ENGINE...</span>
+        <div className="flex flex-col items-center gap-3">
+          <RefreshCw className="w-5 h-5 text-cyan-400 animate-spin" />
+          <span>CONNECTING TO SOC-X SIEM ENGINE (WARMUP)...</span>
         </div>
       </div>
     );

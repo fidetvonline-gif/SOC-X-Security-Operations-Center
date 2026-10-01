@@ -225,31 +225,35 @@ async function startServer() {
   });
 
   app.post('/api/alerts', async (req, res) => {
-    const newAlert: Alert = {
-      alert_id: `ALT-${Math.floor(1000 + Math.random() * 9000)}`,
-      timestamp: new Date().toISOString(),
-      rule_id: req.body.rule_id || 'RULE-GEN-01',
-      rule_name: req.body.rule_name || 'Generic Suspicious Activity',
-      severity: req.body.severity || 'Medium',
-      risk_score: req.body.risk_score || 25,
-      source_host: req.body.source_host || 'WIN-EP01',
-      source_ip: req.body.source_ip || '192.168.1.105',
-      target_account: req.body.target_account || 'user',
-      mitre_technique: req.body.mitre_technique || 'T1078',
-      mitre_tactic: req.body.mitre_tactic || 'Defense Evasion',
-      evidence_raw: req.body.evidence_raw || 'Manual alert ingested into SIEM.',
-      status: 'Unassigned'
-    };
-    alerts.unshift(newAlert);
-    checkCorrelation(newAlert.source_host);
+    try {
+      const newAlert: Alert = {
+        alert_id: `ALT-${Math.floor(1000 + Math.random() * 9000)}`,
+        timestamp: new Date().toISOString(),
+        rule_id: req.body.rule_id || 'RULE-GEN-01',
+        rule_name: req.body.rule_name || 'Generic Suspicious Activity',
+        severity: req.body.severity || 'Medium',
+        risk_score: req.body.risk_score || 25,
+        source_host: req.body.source_host || 'WIN-EP01',
+        source_ip: req.body.source_ip || '192.168.1.105',
+        target_account: req.body.target_account || 'user',
+        mitre_technique: req.body.mitre_technique || 'T1078',
+        mitre_tactic: req.body.mitre_tactic || 'Defense Evasion',
+        evidence_raw: req.body.evidence_raw || 'Manual alert ingested into SIEM.',
+        status: 'Unassigned'
+      };
+      alerts.unshift(newAlert);
+      checkCorrelation(newAlert.source_host);
 
-    if (supabase) {
-      try {
-        await supabase.from('alerts').insert([newAlert]);
-      } catch (e) {}
+      if (supabase) {
+        try {
+          await supabase.from('alerts').insert([newAlert]);
+        } catch (e) {}
+      }
+
+      res.status(201).json(newAlert);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || 'Internal server error' });
     }
-
-    res.status(201).json(newAlert);
   });
 
   app.get('/api/incidents', (req, res) => {
@@ -257,35 +261,39 @@ async function startServer() {
   });
 
   app.patch('/api/incidents/:id', async (req, res) => {
-    const { id } = req.params;
-    const { status, assigned_analyst, notes, response_action_taken } = req.body;
-    const incident = incidents.find(i => i.incident_id === id);
-    if (!incident) {
-      return res.status(404).json({ error: 'Incident not found' });
+    try {
+      const { id } = req.params;
+      const { status, assigned_analyst, notes, response_action_taken } = req.body;
+      const incident = incidents.find(i => i.incident_id === id);
+      if (!incident) {
+        return res.status(404).json({ error: 'Incident not found' });
+      }
+      if (status) incident.status = status;
+      if (assigned_analyst) incident.assigned_analyst = assigned_analyst;
+      if (notes) incident.notes = notes;
+      if (response_action_taken) incident.response_action_taken = response_action_taken;
+
+      const newAudit: AuditLog = {
+        audit_id: `AUD-${Math.floor(100 + Math.random() * 900)}`,
+        timestamp: new Date().toISOString(),
+        analyst_id: assigned_analyst || 'Analyst_1',
+        action_type: 'INCIDENT_UPDATE',
+        target: id,
+        details: `Updated incident ${id}: status=${status || incident.status}, action=${response_action_taken || 'none'}`
+      };
+      auditLogs.unshift(newAudit);
+
+      if (supabase) {
+        try {
+          await supabase.from('incidents').update(incident).eq('incident_id', id);
+          await supabase.from('audit_logs').insert([newAudit]);
+        } catch (e) {}
+      }
+
+      res.json(incident);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || 'Internal server error' });
     }
-    if (status) incident.status = status;
-    if (assigned_analyst) incident.assigned_analyst = assigned_analyst;
-    if (notes) incident.notes = notes;
-    if (response_action_taken) incident.response_action_taken = response_action_taken;
-
-    const newAudit: AuditLog = {
-      audit_id: `AUD-${Math.floor(100 + Math.random() * 900)}`,
-      timestamp: new Date().toISOString(),
-      analyst_id: assigned_analyst || 'Analyst_1',
-      action_type: 'INCIDENT_UPDATE',
-      target: id,
-      details: `Updated incident ${id}: status=${status || incident.status}, action=${response_action_taken || 'none'}`
-    };
-    auditLogs.unshift(newAudit);
-
-    if (supabase) {
-      try {
-        await supabase.from('incidents').update(incident).eq('incident_id', id);
-        await supabase.from('audit_logs').insert([newAudit]);
-      } catch (e) {}
-    }
-
-    res.json(incident);
   });
 
   app.get('/api/endpoints', (req, res) => {
@@ -293,213 +301,226 @@ async function startServer() {
   });
 
   app.post('/api/response/isolate', async (req, res) => {
-    const { host_id, analyst_id } = req.body;
-    const endpoint = endpoints.find(e => e.host_id === host_id || e.hostname === host_id);
-    if (!endpoint) {
-      return res.status(404).json({ error: 'Endpoint not found' });
+    try {
+      const { host_id, analyst_id } = req.body;
+      const endpoint = endpoints.find(e => e.host_id === host_id || e.hostname === host_id);
+      if (!endpoint) {
+        return res.status(404).json({ error: 'Endpoint not found' });
+      }
+      endpoint.status = 'Isolated';
+
+      const newAudit: AuditLog = {
+        audit_id: `AUD-${Math.floor(100 + Math.random() * 900)}`,
+        timestamp: new Date().toISOString(),
+        analyst_id: analyst_id || 'Analyst_1',
+        action_type: 'ENDPOINT_ISOLATION',
+        target: endpoint.hostname,
+        details: `Successfully isolated host ${endpoint.hostname} (${endpoint.ip_address}) from network.`
+      };
+      auditLogs.unshift(newAudit);
+
+      if (supabase) {
+        try {
+          await supabase.from('endpoints').update({ status: 'Isolated' }).eq('hostname', endpoint.hostname);
+          await supabase.from('audit_logs').insert([newAudit]);
+        } catch (e) {}
+      }
+
+      res.json({ success: true, endpoint, message: `Host ${endpoint.hostname} has been isolated.` });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || 'Internal server error' });
     }
-    endpoint.status = 'Isolated';
-
-    const newAudit: AuditLog = {
-      audit_id: `AUD-${Math.floor(100 + Math.random() * 900)}`,
-      timestamp: new Date().toISOString(),
-      analyst_id: analyst_id || 'Analyst_1',
-      action_type: 'ENDPOINT_ISOLATION',
-      target: endpoint.hostname,
-      details: `Successfully isolated host ${endpoint.hostname} (${endpoint.ip_address}) from network.`
-    };
-    auditLogs.unshift(newAudit);
-
-    if (supabase) {
-      try {
-        await supabase.from('endpoints').update({ status: 'Isolated' }).eq('hostname', endpoint.hostname);
-        await supabase.from('audit_logs').insert([newAudit]);
-      } catch (e) {}
-    }
-
-    res.json({ success: true, endpoint, message: `Host ${endpoint.hostname} has been isolated.` });
   });
 
   app.post('/api/response/disable-account', async (req, res) => {
-    const { username, analyst_id } = req.body;
-    const newAudit: AuditLog = {
-      audit_id: `AUD-${Math.floor(100 + Math.random() * 900)}`,
-      timestamp: new Date().toISOString(),
-      analyst_id: analyst_id || 'Analyst_1',
-      action_type: 'ACCOUNT_DISABLE',
-      target: username,
-      details: `Executed active response command: net user ${username} /active:no. Account disabled.`
-    };
-    auditLogs.unshift(newAudit);
+    try {
+      const { username, analyst_id } = req.body;
+      const newAudit: AuditLog = {
+        audit_id: `AUD-${Math.floor(100 + Math.random() * 900)}`,
+        timestamp: new Date().toISOString(),
+        analyst_id: analyst_id || 'Analyst_1',
+        action_type: 'ACCOUNT_DISABLE',
+        target: username,
+        details: `Executed active response command: net user ${username} /active:no. Account disabled.`
+      };
+      auditLogs.unshift(newAudit);
 
-    if (supabase) {
-      try {
-        await supabase.from('audit_logs').insert([newAudit]);
-      } catch (e) {}
+      if (supabase) {
+        try {
+          await supabase.from('audit_logs').insert([newAudit]);
+        } catch (e) {}
+      }
+
+      res.json({ success: true, message: `Account ${username} disabled successfully.` });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || 'Internal server error' });
     }
-
-    res.json({ success: true, message: `Account ${username} disabled successfully.` });
   });
 
   app.post('/api/simulate', async (req, res) => {
-    const { scenario } = req.body;
-    let newAlerts: Alert[] = [];
+    try {
+      const { scenario } = req.body;
+      let newAlerts: Alert[] = [];
 
-    if (scenario === 'brute-force') {
-      const a: Alert = {
-        alert_id: `ALT-${Math.floor(1000 + Math.random() * 9000)}`,
-        timestamp: new Date().toISOString(),
-        rule_id: "RULE-BF-01",
-        rule_name: "Hydra SSH/RDP Brute Force Attack",
-        severity: "High",
-        risk_score: 40,
-        source_host: "WIN-EP01",
-        source_ip: "192.168.1.180",
-        target_account: "administrator",
-        mitre_technique: "T1110",
-        mitre_tactic: "Credential Access",
-        evidence_raw: "Windows Event ID 4625: 38 failed logon attempts recorded in 120 seconds.",
-        status: "Unassigned"
-      };
-      alerts.unshift(a);
-      newAlerts.push(a);
-    } else if (scenario === 'powershell') {
-      const a: Alert = {
-        alert_id: `ALT-${Math.floor(1000 + Math.random() * 9000)}`,
-        timestamp: new Date().toISOString(),
-        rule_id: "RULE-PS-01",
-        rule_name: "Encoded Base64 PowerShell Execution",
-        severity: "High",
-        risk_score: 40,
-        source_host: "WIN-EP01",
-        source_ip: "192.168.1.105",
-        target_account: "system",
-        mitre_technique: "T1059.001",
-        mitre_tactic: "Execution",
-        evidence_raw: "Sysmon Event ID 1: powershell.exe -nop -w hidden -enc SQBFAFgAIAAoAE4AZQB3AC-ATwBiAGoAZQBjAHQAIABOAGUAdAAuAFcAZQBiAGMAbABpAGUAbgB0ACkALgBEOWNk...",
-        status: "Unassigned"
-      };
-      alerts.unshift(a);
-      newAlerts.push(a);
-    } else if (scenario === 'account-creation') {
-      const a: Alert = {
-        alert_id: `ALT-${Math.floor(1000 + Math.random() * 9000)}`,
-        timestamp: new Date().toISOString(),
-        rule_id: "RULE-USR-01",
-        rule_name: "Unauthorized Local User Creation",
-        severity: "Medium",
-        risk_score: 25,
-        source_host: "WIN-EP01",
-        source_ip: "192.168.1.105",
-        target_account: "test_admin",
-        mitre_technique: "T1098",
-        mitre_tactic: "Persistence",
-        evidence_raw: "Windows Event ID 4720: User account created: test_admin.",
-        status: "Unassigned"
-      };
-      alerts.unshift(a);
-      newAlerts.push(a);
-    } else if (scenario === 'persistence') {
-      const a: Alert = {
-        alert_id: `ALT-${Math.floor(1000 + Math.random() * 9000)}`,
-        timestamp: new Date().toISOString(),
-        rule_id: "RULE-TSK-01",
-        rule_name: "Scheduled Task Persistence Registered",
-        severity: "High",
-        risk_score: 40,
-        source_host: "WIN-EP01",
-        source_ip: "192.168.1.105",
-        target_account: "SYSTEM",
-        mitre_technique: "T1053.005",
-        mitre_tactic: "Persistence",
-        evidence_raw: "Sysmon Event ID 1: schtasks /create /tn 'WindowsSecurityUpdate' /tr 'cmd.exe /c calc.exe'",
-        status: "Unassigned"
-      };
-      alerts.unshift(a);
-      newAlerts.push(a);
-    } else if (scenario === 'correlated') {
-      const now = new Date();
-      const a1: Alert = {
-        alert_id: `ALT-${Math.floor(1000 + Math.random() * 9000)}`,
-        timestamp: new Date(now.getTime() - 10000).toISOString(),
-        rule_id: "RULE-BF-01",
-        rule_name: "Hydra Brute Force Attack",
-        severity: "High",
-        risk_score: 40,
-        source_host: "FIN-LAPTOP04",
-        source_ip: "192.168.1.200",
-        target_account: "finance_admin",
-        mitre_technique: "T1110",
-        mitre_tactic: "Credential Access",
-        evidence_raw: "Event ID 4625: 50 failed logins on FIN-LAPTOP04",
-        status: "Investigating"
-      };
-      const a2: Alert = {
-        alert_id: `ALT-${Math.floor(1000 + Math.random() * 9000)}`,
-        timestamp: new Date(now.getTime() - 5000).toISOString(),
-        rule_id: "RULE-PS-01",
-        rule_name: "Encoded PowerShell Execution",
-        severity: "High",
-        risk_score: 40,
-        source_host: "FIN-LAPTOP04",
-        source_ip: "192.168.1.200",
-        target_account: "finance_admin",
-        mitre_technique: "T1059.001",
-        mitre_tactic: "Execution",
-        evidence_raw: "Sysmon Event ID 1: powershell.exe -enc JABzACA...",
-        status: "Investigating"
-      };
-      const a3: Alert = {
-        alert_id: `ALT-${Math.floor(1000 + Math.random() * 9000)}`,
-        timestamp: new Date().toISOString(),
-        rule_id: "RULE-TSK-01",
-        rule_name: "Scheduled Task Persistence",
-        severity: "Critical",
-        risk_score: 50,
-        source_host: "FIN-LAPTOP04",
-        source_ip: "192.168.1.200",
-        target_account: "SYSTEM",
-        mitre_technique: "T1053.005",
-        mitre_tactic: "Persistence",
-        evidence_raw: "SchTasks /create persistence payload on FIN-LAPTOP04",
-        status: "Investigating"
-      };
-      alerts.unshift(a3, a2, a1);
-      newAlerts.push(a1, a2, a3);
+      if (scenario === 'brute-force') {
+        const a: Alert = {
+          alert_id: `ALT-${Math.floor(1000 + Math.random() * 9000)}`,
+          timestamp: new Date().toISOString(),
+          rule_id: "RULE-BF-01",
+          rule_name: "Hydra SSH/RDP Brute Force Attack",
+          severity: "High",
+          risk_score: 40,
+          source_host: "WIN-EP01",
+          source_ip: "192.168.1.180",
+          target_account: "administrator",
+          mitre_technique: "T1110",
+          mitre_tactic: "Credential Access",
+          evidence_raw: "Windows Event ID 4625: 38 failed logon attempts recorded in 120 seconds.",
+          status: "Unassigned"
+        };
+        alerts.unshift(a);
+        newAlerts.push(a);
+      } else if (scenario === 'powershell') {
+        const a: Alert = {
+          alert_id: `ALT-${Math.floor(1000 + Math.random() * 9000)}`,
+          timestamp: new Date().toISOString(),
+          rule_id: "RULE-PS-01",
+          rule_name: "Encoded Base64 PowerShell Execution",
+          severity: "High",
+          risk_score: 40,
+          source_host: "WIN-EP01",
+          source_ip: "192.168.1.105",
+          target_account: "system",
+          mitre_technique: "T1059.001",
+          mitre_tactic: "Execution",
+          evidence_raw: "Sysmon Event ID 1: powershell.exe -nop -w hidden -enc SQBFAFgAIAAoAE4AZQB3AC-ATwBiAGoAZQBjAHQAIABOAGUAdAAuAFcAZQBiAGMAbABpAGUAbgB0ACkALgBEOWNk...",
+          status: "Unassigned"
+        };
+        alerts.unshift(a);
+        newAlerts.push(a);
+      } else if (scenario === 'account-creation') {
+        const a: Alert = {
+          alert_id: `ALT-${Math.floor(1000 + Math.random() * 9000)}`,
+          timestamp: new Date().toISOString(),
+          rule_id: "RULE-USR-01",
+          rule_name: "Unauthorized Local User Creation",
+          severity: "Medium",
+          risk_score: 25,
+          source_host: "WIN-EP01",
+          source_ip: "192.168.1.105",
+          target_account: "test_admin",
+          mitre_technique: "T1098",
+          mitre_tactic: "Persistence",
+          evidence_raw: "Windows Event ID 4720: User account created: test_admin.",
+          status: "Unassigned"
+        };
+        alerts.unshift(a);
+        newAlerts.push(a);
+      } else if (scenario === 'persistence') {
+        const a: Alert = {
+          alert_id: `ALT-${Math.floor(1000 + Math.random() * 9000)}`,
+          timestamp: new Date().toISOString(),
+          rule_id: "RULE-TSK-01",
+          rule_name: "Scheduled Task Persistence Registered",
+          severity: "High",
+          risk_score: 40,
+          source_host: "WIN-EP01",
+          source_ip: "192.168.1.105",
+          target_account: "SYSTEM",
+          mitre_technique: "T1053.005",
+          mitre_tactic: "Persistence",
+          evidence_raw: "Sysmon Event ID 1: schtasks /create /tn 'WindowsSecurityUpdate' /tr 'cmd.exe /c calc.exe'",
+          status: "Unassigned"
+        };
+        alerts.unshift(a);
+        newAlerts.push(a);
+      } else if (scenario === 'correlated') {
+        const now = new Date();
+        const a1: Alert = {
+          alert_id: `ALT-${Math.floor(1000 + Math.random() * 9000)}`,
+          timestamp: new Date(now.getTime() - 10000).toISOString(),
+          rule_id: "RULE-BF-01",
+          rule_name: "Hydra Brute Force Attack",
+          severity: "High",
+          risk_score: 40,
+          source_host: "FIN-LAPTOP04",
+          source_ip: "192.168.1.200",
+          target_account: "finance_admin",
+          mitre_technique: "T1110",
+          mitre_tactic: "Credential Access",
+          evidence_raw: "Event ID 4625: 50 failed logins on FIN-LAPTOP04",
+          status: "Investigating"
+        };
+        const a2: Alert = {
+          alert_id: `ALT-${Math.floor(1000 + Math.random() * 9000)}`,
+          timestamp: new Date(now.getTime() - 5000).toISOString(),
+          rule_id: "RULE-PS-01",
+          rule_name: "Encoded PowerShell Execution",
+          severity: "High",
+          risk_score: 40,
+          source_host: "FIN-LAPTOP04",
+          source_ip: "192.168.1.200",
+          target_account: "finance_admin",
+          mitre_technique: "T1059.001",
+          mitre_tactic: "Execution",
+          evidence_raw: "Sysmon Event ID 1: powershell.exe -enc JABzACA...",
+          status: "Investigating"
+        };
+        const a3: Alert = {
+          alert_id: `ALT-${Math.floor(1000 + Math.random() * 9000)}`,
+          timestamp: new Date().toISOString(),
+          rule_id: "RULE-TSK-01",
+          rule_name: "Scheduled Task Persistence",
+          severity: "Critical",
+          risk_score: 50,
+          source_host: "FIN-LAPTOP04",
+          source_ip: "192.168.1.200",
+          target_account: "SYSTEM",
+          mitre_technique: "T1053.005",
+          mitre_tactic: "Persistence",
+          evidence_raw: "SchTasks /create persistence payload on FIN-LAPTOP04",
+          status: "Investigating"
+        };
+        alerts.unshift(a3, a2, a1);
+        newAlerts.push(a1, a2, a3);
 
-      const newInc: Incident = {
-        incident_id: `INC-${Math.floor(2000 + Math.random() * 9000)}`,
-        title: "Multi-Stage Chain Compromise on FIN-LAPTOP04",
-        severity: "Critical",
-        status: "Investigating",
-        risk_score: 95,
-        affected_asset: "FIN-LAPTOP04",
-        associated_alert_ids: [a1.alert_id, a2.alert_id, a3.alert_id],
-        mitre_mappings: ["T1110", "T1059.001", "T1053.005"],
-        assigned_analyst: "Analyst_1",
-        notes: "Automated correlation engine triggered: Brute force leading to encoded payload and persistence task.",
-        response_action_taken: "Pending Analyst Action",
-        created_at: new Date().toISOString()
-      };
-      incidents.unshift(newInc);
+        const newInc: Incident = {
+          incident_id: `INC-${Math.floor(2000 + Math.random() * 9000)}`,
+          title: "Multi-Stage Chain Compromise on FIN-LAPTOP04",
+          severity: "Critical",
+          status: "Investigating",
+          risk_score: 95,
+          affected_asset: "FIN-LAPTOP04",
+          associated_alert_ids: [a1.alert_id, a2.alert_id, a3.alert_id],
+          mitre_mappings: ["T1110", "T1059.001", "T1053.005"],
+          assigned_analyst: "Analyst_1",
+          notes: "Automated correlation engine triggered: Brute force leading to encoded payload and persistence task.",
+          response_action_taken: "Pending Analyst Action",
+          created_at: new Date().toISOString()
+        };
+        incidents.unshift(newInc);
 
-      if (supabase) {
-        try {
-          await supabase.from('incidents').insert([newInc]);
-        } catch (e) {}
+        if (supabase) {
+          try {
+            await supabase.from('incidents').insert([newInc]);
+          } catch (e) {}
+        }
       }
-    }
 
-    if (newAlerts.length > 0) {
-      checkCorrelation(newAlerts[0].source_host);
-      if (supabase) {
-        try {
-          await supabase.from('alerts').insert(newAlerts);
-        } catch (e) {}
+      if (newAlerts.length > 0) {
+        checkCorrelation(newAlerts[0].source_host);
+        if (supabase) {
+          try {
+            await supabase.from('alerts').insert(newAlerts);
+          } catch (e) {}
+        }
       }
-    }
 
-    res.json({ success: true, scenario, newAlerts });
+      res.json({ success: true, scenario, newAlerts });
+    } catch (err: any) {
+      console.error('Simulation error:', err);
+      res.status(500).json({ success: false, error: err.message || 'Simulation execution failed' });
+    }
   });
 
   function checkCorrelation(host: string) {
