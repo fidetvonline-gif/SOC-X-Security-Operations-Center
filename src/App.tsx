@@ -106,13 +106,11 @@ export default function App() {
       const res = await fetch('/api/data');
       const text = await res.text();
       
-      // Handle server warmup HTML response ("Starting Server...")
       if (text.trim().startsWith('<!doctype') || text.includes('Starting Server')) {
         if (retries > 0) {
           setTimeout(() => fetchData(retries - 1, delay), delay);
           return;
         } else {
-          console.error('Server warmup timed out.');
           setLoading(false);
           return;
         }
@@ -126,7 +124,6 @@ export default function App() {
           setTimeout(() => fetchData(retries - 1, delay), delay);
           return;
         }
-        console.error('Non-JSON response from /api/data:', text);
         setLoading(false);
         return;
       }
@@ -144,7 +141,6 @@ export default function App() {
         setTimeout(() => fetchData(retries - 1, delay), delay);
         return;
       }
-      console.error('Failed to fetch SOC data:', err);
       setLoading(false);
     }
   };
@@ -155,7 +151,7 @@ export default function App() {
     return () => clearInterval(interval);
   }, []);
 
-  const triggerSimulation = async (scenario: string) => {
+  const triggerSimulation = async (scenario: string, retries = 2) => {
     setSimulating(true);
     setSimulationMessage(`Executing scenario [${scenario}] through Wazuh ingestion pipeline...`);
     try {
@@ -165,15 +161,24 @@ export default function App() {
         body: JSON.stringify({ scenario })
       });
       const text = await res.text();
-      if (text.trim().startsWith('<!doctype') || text.includes('Starting Server')) {
-        throw new Error('Server is still warming up. Please try again.');
+      
+      // If gateway warmup or HTML error page ("The page c..."), retry
+      if (text.trim().startsWith('<!doctype') || text.includes('Starting Server') || text.startsWith('The page c')) {
+        if (retries > 0) {
+          setSimulationMessage(`Server gateway warming up... retrying simulation (${retries} left)...`);
+          await new Promise(r => setTimeout(r, 1500));
+          return triggerSimulation(scenario, retries - 1);
+        }
+        throw new Error('Server gateway unavailable. Please reload the app.');
       }
+
       let data;
       try {
         data = JSON.parse(text);
       } catch (e) {
         throw new Error(`Server returned non-JSON response (${res.status}): ${text.slice(0, 80)}`);
       }
+
       if (data.success) {
         setSimulationMessage(`Simulation successful. Telemetry ingested & correlated.`);
         await fetchData(3, 1000);
@@ -181,6 +186,10 @@ export default function App() {
         setSimulationMessage(`Simulation failed: ${data.error || 'Unknown error'}`);
       }
     } catch (err: any) {
+      if (retries > 0) {
+        await new Promise(r => setTimeout(r, 1500));
+        return triggerSimulation(scenario, retries - 1);
+      }
       setSimulationMessage(`Simulation error: ${err.message || err}`);
     } finally {
       setTimeout(() => setSimulating(false), 3000);
@@ -195,15 +204,10 @@ export default function App() {
         body: JSON.stringify({ host_id: hostId, analyst_id: 'Analyst_1' })
       });
       const text = await res.text();
-      if (text.trim().startsWith('<!doctype') || text.includes('Starting Server')) {
-        throw new Error('Server is still warming up.');
+      if (text.trim().startsWith('<!doctype') || text.includes('Starting Server') || text.startsWith('The page c')) {
+        throw new Error('Server gateway warming up.');
       }
-      let data;
-      try {
-        data = JSON.parse(text);
-      } catch (e) {
-        throw new Error(`Server returned non-JSON response (${res.status})`);
-      }
+      let data = JSON.parse(text);
       if (data.success) {
         await fetchData(3, 1000);
         alert(data.message);
@@ -221,15 +225,10 @@ export default function App() {
         body: JSON.stringify({ username, analyst_id: 'Analyst_1' })
       });
       const text = await res.text();
-      if (text.trim().startsWith('<!doctype') || text.includes('Starting Server')) {
-        throw new Error('Server is still warming up.');
+      if (text.trim().startsWith('<!doctype') || text.includes('Starting Server') || text.startsWith('The page c')) {
+        throw new Error('Server gateway warming up.');
       }
-      let data;
-      try {
-        data = JSON.parse(text);
-      } catch (e) {
-        throw new Error(`Server returned non-JSON response (${res.status})`);
-      }
+      let data = JSON.parse(text);
       if (data.success) {
         await fetchData(3, 1000);
         alert(data.message);
