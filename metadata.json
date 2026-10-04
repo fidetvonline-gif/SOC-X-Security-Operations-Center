@@ -1,6 +1,6 @@
 {
   "name": "SOC-X Security Operations Center",
-  "description": "Enterprise-grade SIEM, Incident Investigation, Threat Correlation, and Automated Active Response platform.",
+  "description": "Lightweight academic SOC simulation, threat correlation, and automated incident response platform for educational evaluation.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }
